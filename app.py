@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 
 try:
     import settings
+    from macos_token import discover_tokens, open_mac_token
     from signer_core import (
         BatchOutcome,
         SignatureOptions,
@@ -57,6 +58,10 @@ class AssinadorApp(tk.Tk):
         self.a3_key_label = tk.StringVar()
         self.a3_pin = tk.StringVar()
 
+        self.tokens = []
+        self.manual_token = tk.BooleanVar(value=False)
+        self._auto_choose_token = True
+
         self.reason = tk.StringVar(value="Assinatura digital")
         self.location = tk.StringVar()
         self.appearance = tk.StringVar(value="invisible")
@@ -83,6 +88,7 @@ class AssinadorApp(tk.Tk):
 
         self._build_ui()
         self._fit_window()
+        self._refresh_tokens()
 
     def _fit_window(self):
         # A altura que o Tk exige varia com a versão (o Tk 9 usa linhas maiores),
@@ -153,11 +159,11 @@ class AssinadorApp(tk.Tk):
         choose.pack(fill="x", padx=12, pady=(10, 2))
         ttk.Radiobutton(
             choose, text="A1 (.p12 / .pfx)", variable=self.cert_type,
-            value="A1", command=self._toggle_cert_frames
+            value="A1", command=self._choose_cert_type
         ).pack(side="left")
         ttk.Radiobutton(
             choose, text="A3 (token/cartão PKCS#11)", variable=self.cert_type,
-            value="A3", command=self._toggle_cert_frames
+            value="A3", command=self._choose_cert_type
         ).pack(side="left", padx=(20, 0))
 
         self.a1_frame = ttk.Frame(cert_box)
@@ -178,28 +184,39 @@ class AssinadorApp(tk.Tk):
         self.a3_frame = ttk.Frame(cert_box)
         self.a3_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(self.a3_frame, text="Módulo PKCS#11").grid(row=0, column=0, sticky="w", **pad)
-        ttk.Entry(self.a3_frame, textvariable=self.a3_module).grid(
+        ttk.Label(self.a3_frame, text="Certificados no Mac").grid(row=0, column=0, sticky="w", **pad)
+        self.token_box = ttk.Combobox(self.a3_frame, state="readonly")
+        self.token_box.grid(row=0, column=1, sticky="ew", **pad)
+        self.token_box.bind("<<ComboboxSelected>>", lambda _: self.a3_pin.set(""))
+        self.refresh_button = ttk.Button(self.a3_frame, text="Atualizar", command=self._refresh_tokens)
+        self.refresh_button.grid(row=0, column=2, **pad)
+        ttk.Checkbutton(self.a3_frame, text="Configuração manual de driver PKCS#11",
+                        variable=self.manual_token, command=self._toggle_manual).grid(
+            row=2, column=1, sticky="w", **pad)
+        self.manual_frame = ttk.Frame(self.a3_frame)
+        self.manual_frame.columnconfigure(1, weight=1)
+        ttk.Label(self.manual_frame, text="Módulo PKCS#11").grid(row=0, column=0, sticky="w", **pad)
+        ttk.Entry(self.manual_frame, textvariable=self.a3_module).grid(
             row=0, column=1, sticky="ew", **pad
         )
-        ttk.Button(self.a3_frame, text="Selecionar…", command=self._choose_pkcs11).grid(
+        ttk.Button(self.manual_frame, text="Selecionar…", command=self._choose_pkcs11).grid(
             row=0, column=2, **pad
         )
-        ttk.Label(self.a3_frame, text="Token label").grid(row=1, column=0, sticky="w", **pad)
-        ttk.Entry(self.a3_frame, textvariable=self.a3_token_label).grid(
+        ttk.Label(self.manual_frame, text="Token label").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Entry(self.manual_frame, textvariable=self.a3_token_label).grid(
             row=1, column=1, sticky="ew", **pad
         )
-        ttk.Label(self.a3_frame, text="Certificate label").grid(row=2, column=0, sticky="w", **pad)
-        ttk.Entry(self.a3_frame, textvariable=self.a3_cert_label).grid(
+        ttk.Label(self.manual_frame, text="Certificate label").grid(row=2, column=0, sticky="w", **pad)
+        ttk.Entry(self.manual_frame, textvariable=self.a3_cert_label).grid(
             row=2, column=1, sticky="ew", **pad
         )
-        ttk.Label(self.a3_frame, text="Key label (opcional)").grid(row=3, column=0, sticky="w", **pad)
-        ttk.Entry(self.a3_frame, textvariable=self.a3_key_label).grid(
+        ttk.Label(self.manual_frame, text="Key label (opcional)").grid(row=3, column=0, sticky="w", **pad)
+        ttk.Entry(self.manual_frame, textvariable=self.a3_key_label).grid(
             row=3, column=1, sticky="ew", **pad
         )
-        ttk.Label(self.a3_frame, text="PIN").grid(row=4, column=0, sticky="w", **pad)
+        ttk.Label(self.a3_frame, text="PIN").grid(row=1, column=0, sticky="w", **pad)
         ttk.Entry(self.a3_frame, textvariable=self.a3_pin, show="•", exportselection=False).grid(
-            row=4, column=1, sticky="ew", **pad
+            row=1, column=1, sticky="ew", **pad
         )
 
         meta_box = ttk.LabelFrame(outer, text="Dados da assinatura")
@@ -232,6 +249,65 @@ class AssinadorApp(tk.Tk):
             bottom, text="Mostrar no Finder", command=self._reveal, state="disabled"
         )
         self.finder_button.pack(side="right", padx=(0, 8))
+
+    def _choose_cert_type(self):
+        self._auto_choose_token = False
+        self._toggle_cert_frames()
+
+    def _toggle_manual(self):
+        self.a3_pin.set("")
+        if self.manual_token.get():
+            self.manual_frame.grid(row=3, column=0, columnspan=3, sticky="ew")
+            self.token_box.configure(state="disabled")
+        else:
+            self.manual_frame.grid_remove()
+            self.token_box.configure(state="readonly")
+        self._fit_window()
+
+    def _refresh_tokens(self):
+        self.refresh_button.configure(state="disabled")
+        self.a3_pin.set("")
+        selected = self._selected_token()
+        self.tokens = []
+        self.token_box.configure(values=())
+        self.token_box.set("Procurando certificados…")
+        events = queue.SimpleQueue()
+
+        def discover():
+            try:
+                events.put((discover_tokens(), "Nenhum certificado de assinatura conectado"))
+            except Exception:
+                events.put(([], "Falha na consulta. Reconecte o token e clique em Atualizar."))
+
+        threading.Thread(target=discover, daemon=True).start()
+        self.after(30, self._receive_tokens, events, selected)
+
+    def _selected_token(self):
+        index = self.token_box.current()
+        return self.tokens[index] if 0 <= index < len(self.tokens) else None
+
+    def _receive_tokens(self, events, previous):
+        try:
+            self.tokens, empty_message = events.get_nowait()
+        except queue.Empty:
+            self.after(30, self._receive_tokens, events, previous)
+            return
+        self.refresh_button.configure(state="normal")
+        titles = [item.title for item in self.tokens]
+        # Dois cartões podem trazer certificados com o mesmo nome e validade.
+        labels = [title if titles.count(title) == 1 else f"{title} · ID {item.short_id}"
+                  for item, title in zip(self.tokens, titles)]
+        self.token_box.configure(values=labels)
+        if previous in self.tokens:
+            self.token_box.current(self.tokens.index(previous))
+        elif len(self.tokens) == 1:
+            self.token_box.current(0)
+        else:
+            self.token_box.set("Escolha um certificado" if self.tokens else empty_message)
+        if self.tokens and self._auto_choose_token and not (self.a1_file.get() or self.a1_password.get()):
+            self.cert_type.set("A3")
+            self._toggle_cert_frames()
+        self._auto_choose_token = False
 
     def _toggle_cert_frames(self):
         if self.cert_type.get() == "A1":
@@ -357,6 +433,12 @@ class AssinadorApp(tk.Tk):
             messagebox.showerror(APP_TITLE, str(exc))
             return
 
+        selected = self._selected_token()
+        if self.cert_type.get() == "A3" and not self.manual_token.get():
+            if selected is None or not self.a3_pin.get():
+                messagebox.showerror(APP_TITLE, "Selecione o certificado conectado e digite o PIN.")
+                return
+
         existing = [
             dst for _, dst in pairs if dst.exists() and str(dst) != self._confirmed_out
         ]
@@ -376,6 +458,8 @@ class AssinadorApp(tk.Tk):
         job = {"type": self.cert_type.get(), "pairs": pairs}
         if job["type"] == "A1":
             job.update(a1_file=self.a1_file.get(), a1_password=self.a1_password.get())
+        elif not self.manual_token.get():
+            job.update(token=selected, a3_pin=self.a3_pin.get())
         else:
             job.update(
                 a3_module=self.a3_module.get(),
@@ -417,6 +501,9 @@ class AssinadorApp(tk.Tk):
             if job["type"] == "A1":
                 signer = load_a1(job["a1_file"], job.pop("a1_password"))
                 outcomes = sign_batch(signer, job["pairs"], opts, progress)
+            elif "token" in job:
+                with open_mac_token(job["token"], job.pop("a3_pin")) as signer:
+                    outcomes = sign_batch(signer, job["pairs"], opts, progress)
             else:
                 # O token é aberto uma vez só, mesmo num lote: o PIN vale para todos.
                 with open_a3(

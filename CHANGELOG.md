@@ -1,5 +1,9 @@
 # Histórico de versões
 
+## 0.3.0
+
+Seleção automática de certificados de assinatura em tokens reconhecidos pelo macOS. O PIN é solicitado ao iniciar a assinatura.
+
 ## 0.2.1 — fork offline
 
 Bloqueio de rede no macOS, remoção da TSA, PDFs assinados com permissão 0600 e preferências limitadas a tipo de certificado e aparência. O build verifica os hashes das dependências. O autoteste exercita o bloqueio de rede e verifica a assinatura A1.

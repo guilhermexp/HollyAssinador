@@ -27,7 +27,8 @@ def setUpModule():
     global _JANELA
     _PATCH_CONFIG.start()
     try:
-        _JANELA = app.AssinadorApp()
+        with mock.patch.object(app.AssinadorApp, "_refresh_tokens"):
+            _JANELA = app.AssinadorApp()
     except tkinter.TclError:
         _JANELA = None
         return
@@ -57,6 +58,7 @@ class JanelaTests(unittest.TestCase):
             p.start()
         self.janela = j = _JANELA
         # estado inicial da janela, como se tivesse acabado de abrir
+        j.manual_token.set(False)
         j.cert_type.set("A1")
         j._toggle_cert_frames()
         j.a1_file.set(str(apoio.a1(self.pasta)))
@@ -198,6 +200,7 @@ class JanelaTests(unittest.TestCase):
 
     def test_pin_e_limpo_mesmo_quando_a_assinatura_falha(self):
         self.janela.cert_type.set("A3")
+        self.janela.manual_token.set(True)
         self.janela.a3_module.set(str(self.pasta / "nao-existe.dylib"))
         self.janela.a3_cert_label.set("cert")
         self.janela.a3_pin.set("1234")
@@ -208,6 +211,29 @@ class JanelaTests(unittest.TestCase):
         self.assertIn("Módulo PKCS#11 não encontrado", self.mensagem(app.messagebox.showerror))
         self.assertEqual(self.janela.a3_pin.get(), "")
         self.assertEqual(str(self.janela.sign_button["state"]), "normal")
+
+    def test_selecao_de_um_ou_varios_tokens(self):
+        from queue import SimpleQueue
+        from types import SimpleNamespace
+
+        j = self.janela
+        a, b = SimpleNamespace(title="Titular A"), SimpleNamespace(title="Titular B")
+        j._auto_choose_token = True
+        j.a1_file.set("")
+        j.a1_password.set("")
+        rows = SimpleQueue()
+        rows.put(([a], "Nenhum"))
+        j._receive_tokens(rows, None)
+        self.assertEqual(j.cert_type.get(), "A3")
+        self.assertIs(j._selected_token(), a)
+        rows.put(([a, b], "Nenhum"))
+        j._receive_tokens(rows, None)
+        self.assertIsNone(j._selected_token())
+        j.token_box.current(1)
+        self.assertIs(j._selected_token(), b)
+        rows.put(([], "Nenhum"))
+        j._receive_tokens(rows, b)
+        self.assertIsNone(j._selected_token())
 
     def test_mostrar_no_finder(self):
         assinado = apoio.pdf(self.pasta / "x-assinado.pdf")

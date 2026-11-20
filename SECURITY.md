@@ -5,7 +5,7 @@ O aplicativo e o utilitário de inspeção do token importam `offline.py` antes 
 ## Tratamento das credenciais
 
 - O A1 é aberto em memória pelo pyHanko. O PFX e a senha entram no processo durante a assinatura. O Python não garante a limpeza física imediata de todas as cópias na memória.
-- No fluxo A3, o PIN é entregue ao módulo PKCS#11 escolhido e a operação criptográfica é solicitada ao token. O aplicativo não solicita a exportação da chave privada. Use o módulo oficial instalado pelo fabricante.
+- A busca automática consulta as identidades de tokens no Chaves com interação desativada, sem pedir PIN. Ao assinar, o aplicativo reconfirma o token e o certificado escolhidos e fornece o PIN a um contexto de autenticação local do macOS, invalidado no fim do lote. No modo manual A3, o PIN é entregue ao módulo PKCS#11 escolhido. O aplicativo não solicita a exportação da chave privada. Use o módulo oficial instalado pelo fabricante.
 - O arquivo de preferências guarda apenas tipo e aparência. Os campos de senha e PIN são esvaziados quando a operação é iniciada. O PDF de saída herda o modo privado do arquivo temporário criado por `mkstemp`.
 - O certificado público e os metadados de assinatura ficam no PDF final. A chave privada, o PIN e a senha não fazem parte do formato de saída.
 

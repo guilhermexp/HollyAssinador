@@ -94,6 +94,9 @@ def run() -> int:
 
     print(f"tkinter {tkinter.TkVersion}: ok")
     print("pkcs11: ok")
+    from macos_token import discover_tokens
+
+    print(f"Certificados de assinatura em tokens reconhecidos pelo macOS: {len(discover_tokens())}")
 
     _check_network_block()
     print("TCP e UDP bloqueados pelo macOS em IPv4 e IPv6: ok")

@@ -20,7 +20,7 @@ Para repetir a abertura pela árvore de desenvolvimento, execute `./run_dev.sh` 
 ## Testar uma assinatura
 
 1. Escolha um PDF fictício em uma pasta local privada fora de serviços de sincronização.
-2. Para A1, selecione um PFX ou P12 de teste e digite a senha. Para A3, selecione o módulo PKCS#11 oficial do fabricante, indique os rótulos e digite o PIN. O programa abre uma sessão por lote.
+2. Para A1, selecione um PFX ou P12 de teste e digite a senha. Para A3, o aplicativo procura as identidades de assinatura que o macOS reconhece nos tokens conectados. Um único certificado já aparece selecionado. Se houver vários, escolha o titular na lista e digite o PIN. Clique em **Atualizar** se conectar ou trocar o token com o aplicativo aberto. **Configuração manual de driver PKCS#11** continua disponível para tokens que aparecem apenas no driver do fabricante. O programa abre uma sessão por lote.
 3. Escolha a aparência e clique em **Assinar PDF**. A cópia assinada tem permissão de leitura e escrita apenas para o proprietário. Um arquivo de saída já existente exige confirmação na interface.
 
 O PDF incorpora o certificado público do titular para permitir a verificação da assinatura. Isso pode identificar o titular a quem receber o documento. A hora do carimbo visual vem do Mac. Esta edição não consulta autoridades de carimbo do tempo ou de revogação e não verifica a cadeia ICP-Brasil.
