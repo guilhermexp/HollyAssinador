@@ -14,3 +14,5 @@ das licenças acompanham o pacote pypdfium2 (pasta `licenses` do dist-info).
 
 Projeto pypdfium2:
 https://pypi.org/project/pypdfium2/
+
+A prévia usa Pillow (MIT-CMU) e PDFium. O carimbo vetorial é gerado com ReportLab (BSD).

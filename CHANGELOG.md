@@ -1,5 +1,9 @@
 # Histórico de versões
 
+## 0.4.0
+
+Prévia integrada com seleção de página e área, movimento e redimensionamento por documento. Carimbo vetorial em duas colunas e exibição opcional do CPF/CNPJ do certificado.
+
 ## 0.3.0
 
 Seleção automática de certificados de assinatura em tokens reconhecidos pelo macOS. O PIN é solicitado ao iniciar a assinatura.

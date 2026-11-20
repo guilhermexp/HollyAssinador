@@ -1,6 +1,6 @@
 # HollyAssinador Offline
 
-Edição para testes em macOS do [HollyAssinador](https://github.com/HollyGM/HollyAssinador), derivada do commit `7ba9fa6`. Assina PDFs individualmente ou em lote com certificado A1 (PFX/P12) ou token A3 (PKCS#11). Usa PAdES com SHA-256 e oferece assinatura invisível ou carimbo visual no rodapé.
+Edição para testes em macOS do [HollyAssinador](https://github.com/HollyGM/HollyAssinador), derivada do commit `7ba9fa6`. Assina PDFs individualmente ou em lote com certificado A1 (PFX/P12) ou token A3 (PKCS#11). Usa PAdES com SHA-256 e oferece assinatura visível com posicionamento na página, rodapé automático ou assinatura invisível.
 
 ## Gerar e abrir o aplicativo
 
@@ -21,7 +21,8 @@ Para repetir a abertura pela árvore de desenvolvimento, execute `./run_dev.sh` 
 
 1. Escolha um PDF fictício em uma pasta local privada fora de serviços de sincronização.
 2. Para A1, selecione um PFX ou P12 de teste e digite a senha. Para A3, o aplicativo procura as identidades de assinatura que o macOS reconhece nos tokens conectados. Um único certificado já aparece selecionado. Se houver vários, escolha o titular na lista e digite o PIN. Clique em **Atualizar** se conectar ou trocar o token com o aplicativo aberto. **Configuração manual de driver PKCS#11** continua disponível para tokens que aparecem apenas no driver do fabricante. O programa abre uma sessão por lote.
-3. Escolha a aparência e clique em **Assinar PDF**. A cópia assinada tem permissão de leitura e escrita apenas para o proprietário. Um arquivo de saída já existente exige confirmação na interface.
+3. Ao abrir o PDF, a prévia aparece ao lado. Navegue pelas páginas, arraste para desenhar a caixa, mova-a pelo centro ou redimensione pelos cantos. A opção **Prévia e posição…** reabre o painel. Em lote, use a lista de documentos para marcar cada PDF.
+4. O carimbo traz nome, declaração de assinatura e data com fuso em duas colunas. **Mostrar CPF/CNPJ** inclui o identificador presente no nome do certificado, se desejado. Para manter os dados fora do carimbo, deixe a opção desmarcada. Clique em **Assinar PDF**. A cópia assinada tem permissão de leitura e escrita apenas para o proprietário. Um arquivo de saída já existente exige confirmação na interface.
 
 O PDF incorpora o certificado público do titular para permitir a verificação da assinatura. Isso pode identificar o titular a quem receber o documento. A hora do carimbo visual vem do Mac. Esta edição não consulta autoridades de carimbo do tempo ou de revogação e não verifica a cadeia ICP-Brasil.
 

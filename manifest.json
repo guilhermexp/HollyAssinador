@@ -1,6 +1,6 @@
 {
   "name": "HollyAssinadorOffline",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "platform": "macOS",
   "features": [
     "PAdES SHA-256",
@@ -8,7 +8,7 @@
     "A3 PKCS#11",
     "Connected token identities via macOS Keychain",
     "macOS network sandbox",
-    "Optional visible signature appearance",
+    "Two-column signature and interactive PDF placement",
     "Batch signing (one PIN per batch)",
     "Certificate validity check"
   ]

@@ -6,7 +6,11 @@ assina sem aparência visual, em vez de cobrir o texto.
 """
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
+from threading import RLock
+
+PDFIUM_LOCK = RLock()
 
 INK_THRESHOLD = 240  # tons de cinza abaixo disso contam como conteúdo
 _INK_TABLE = bytes(1 if value < INK_THRESHOLD else 0 for value in range(256))
@@ -30,22 +34,19 @@ def find_free_box(
     """
     import pypdfium2 as pdfium
 
-    pdf = pdfium.PdfDocument(str(pdf_path))
-    try:
+    with PDFIUM_LOCK, pdfium.PdfDocument(str(pdf_path)) as pdf:
         # sem o ambiente de formulários o pdfium não desenha campos de assinatura,
         # e carimbos de assinaturas anteriores não seriam vistos como conteúdo
         pdf.init_forms()
         page = pdf[page_index if page_index >= 0 else len(pdf) + page_index]
         if page.get_rotation() % 360:
             return None
-        left, bottom, right, top = page.get_cropbox()
-        bitmap = page.render(scale=1, grayscale=True)
-        px_w, px_h, stride = bitmap.width, bitmap.height, bitmap.stride
-        if bitmap.n_channels != 1:
-            return None
-        raw = bytes(bitmap.buffer)
-    finally:
-        pdf.close()
+        left, bottom, right, top = page.get_bbox()
+        with closing(page.render(scale=1, grayscale=True, draw_annots=True)) as bitmap:
+            px_w, px_h, stride = bitmap.width, bitmap.height, bitmap.stride
+            if bitmap.n_channels != 1:
+                return None
+            raw = bytes(bitmap.buffer)
 
     rows = [
         raw[i * stride : i * stride + px_w].translate(_INK_TABLE) for i in range(px_h)

@@ -31,7 +31,7 @@ def load(path: Path | None = None) -> dict:
     }
     if values.get("cert_type") not in (None, "A1", "A3"):
         del values["cert_type"]
-    if values.get("appearance") not in (None, "invisible", "footer"):
+    if values.get("appearance") not in (None, "invisible", "footer", "manual"):
         del values["appearance"]
     return values
 

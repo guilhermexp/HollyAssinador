@@ -12,18 +12,32 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from pyhanko import stamp
+from signature_art import SignatureStyle
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-from pyhanko.pdf_utils.text import TextBoxStyle
 from pyhanko.sign import fields, signers
 from pyhanko.sign.fields import SigSeedSubFilter
+
+
+@dataclass(frozen=True)
+class MarkedBox:
+    source: Path
+    revision: tuple
+    page: int
+    rect: tuple[float, float, float, float]
+    rotation: int
+
+    @staticmethod
+    def file_revision(stat):
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
 
 
 @dataclass(frozen=True)
 class SignatureOptions:
     reason: str = ""
     location: str = ""
-    appearance: str = "invisible"  # "invisible" ou "footer" (carimbo no rodapé)
+    appearance: str = "invisible"
+    placements: tuple[MarkedBox, ...] = ()
+    include_document_id: bool = False
 
 
 class SigningError(RuntimeError):
@@ -59,8 +73,8 @@ NO_SPACE_NOTE = (
     "painel de assinaturas do leitor de PDF."
 )
 
-STAMP_WIDTH = 300
-STAMP_HEIGHT = 36
+STAMP_WIDTH = 238
+STAMP_HEIGHT = 76
 
 # Avisa quando faltar menos que isto para o certificado vencer.
 EXPIRY_WARNING_DAYS = 30
@@ -98,19 +112,6 @@ def _metadata(field_name: str, opts: SignatureOptions) -> signers.PdfSignatureMe
     )
 
 
-def _stamp_style():
-    return stamp.TextStampStyle(
-        stamp_text=(
-            "Assinado digitalmente por\n"
-            "%(signer)s\n"
-            "Data: %(ts)s"
-        ),
-        timestamp_format="%d/%m/%Y %H:%M:%S %z",
-        border_width=1,
-        text_box_style=TextBoxStyle(font_size=7, leading=9),
-    )
-
-
 def _footer_box(src: Path):
     """Área livre no rodapé da última página, ou None se não houver (ou se falhar)."""
     try:
@@ -119,13 +120,6 @@ def _footer_box(src: Path):
         return find_free_box(src, STAMP_WIDTH, STAMP_HEIGHT)
     except Exception:
         return None
-
-
-def _field_spec(field_name: str, box):
-    if box is None:
-        return None
-    # Coordenadas em pontos PDF, na última página.
-    return fields.SigFieldSpec(sig_field_name=field_name, on_page=-1, box=box)
 
 
 def _date(moment: datetime) -> str:
@@ -161,7 +155,7 @@ def certificate_notes(cert, now: Optional[datetime] = None) -> tuple[str, ...]:
     return (f"O certificado {when}. Providencie a renovação.",)
 
 
-def display_name(cert) -> Optional[str]:
+def display_name(cert, include_document_id=False) -> Optional[str]:
     """Nome para o carimbo visível, sem o CPF/CNPJ que o padrão ICP-Brasil põe no nome."""
     if cert is None:
         return None
@@ -171,6 +165,8 @@ def display_name(cert) -> Optional[str]:
         name = name[0] if name else None
     if not name:
         return None
+    if include_document_id:
+        return str(name).strip() or None
     return _ICP_DOCUMENT_SUFFIX.sub("", str(name)).strip() or None
 
 
@@ -256,8 +252,15 @@ def sign_file(
     box = _footer_box(src) if opts.appearance == "footer" else None
     if opts.appearance == "footer" and box is None:
         notes += (NO_SPACE_NOTE,)
+    page, rotation = -1, 0
+    selected = None
+    if opts.appearance == "manual":
+        selected = next((item for item in opts.placements if item.source == src), None)
+        if selected is None:
+            raise SigningError(f"Marque a área da assinatura na prévia de {src.name}.")
+        page, box, rotation = selected.page, selected.rect, selected.rotation
     text_params = {}
-    name = display_name(signer.signing_cert)
+    name = display_name(signer.signing_cert, opts.include_document_id)
     if name:
         text_params["signer"] = name
 
@@ -274,14 +277,16 @@ def sign_file(
 
     try:
         with os.fdopen(fd, "wb") as outf, src.open("rb") as inf:
+            if selected and MarkedBox.file_revision(os.fstat(inf.fileno())) != selected.revision:
+                raise SigningError("O PDF mudou desde a marcação. Abra a prévia e marque a área novamente.")
             writer, hybrid = _open_writer(inf)
             if hybrid:
                 notes += (HYBRID_NOTE,)
             pdf_signer = signers.PdfSigner(
                 signature_meta=meta,
                 signer=signer,
-                stamp_style=_stamp_style() if box else None,
-                new_field_spec=_field_spec(field_name, box),
+                stamp_style=SignatureStyle(rotation=rotation) if box else None,
+                new_field_spec=fields.SigFieldSpec(field_name, on_page=page, box=box) if box else None,
             )
             pdf_signer.sign_pdf(
                 writer, output=outf, appearance_text_params=text_params or None

@@ -235,6 +235,33 @@ class JanelaTests(unittest.TestCase):
         j._receive_tokens(rows, b)
         self.assertIsNone(j._selected_token())
 
+    def test_marcar_mover_e_redimensionar_caixa(self):
+        from types import SimpleNamespace
+        from preview import render_page
+
+        src = apoio.pdf(self.pasta / "previa.pdf").resolve()
+        j = self.janela
+        j._set_inputs([str(src)])
+        panel = j.preview
+        panel.view = render_page(src, 0, (600, 800), 1)
+        panel.ox = panel.oy = 0
+        panel.show_mark = True
+
+        def drag(x, y, x1, y1):
+            start = SimpleNamespace(x=x, y=y)
+            end = SimpleNamespace(x=x1, y=y1)
+            panel.press(start)
+            panel.motion(end)
+            panel.release(end)
+
+        with mock.patch.object(panel, "paint_mark"):
+            drag(20, 30, 165, 80)
+            drag(60, 50, 70, 65)
+            drag(175, 95, 205, 110)
+        self.assertEqual(j.appearance.get(), "manual")
+        self.assertEqual(tuple(round(v) for v in panel.pixel_rect()), (30, 45, 205, 110))
+        self.assertEqual(panel.marks[src].page, 0)
+
     def test_mostrar_no_finder(self):
         assinado = apoio.pdf(self.pasta / "x-assinado.pdf")
         self.janela.last_outputs = [assinado]

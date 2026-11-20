@@ -12,6 +12,9 @@ from tkinter import filedialog, messagebox, ttk
 
 try:
     import settings
+    from preview import Preview
+    from signer_core import display_name
+    from asn1crypto import x509
     from macos_token import discover_tokens, open_mac_token
     from signer_core import (
         BatchOutcome,
@@ -33,8 +36,9 @@ except ImportError as exc:
 APP_TITLE = "HollyAssinador Offline"
 
 APPEARANCES = {
-    "invisible": "Invisível: sem carimbo no PDF (padrão)",
-    "footer": "Carimbo no rodapé da última página, em área livre",
+    "manual": "Área marcada na prévia",
+    "invisible": "Invisível",
+    "footer": "Rodapé automático",
 }
 
 BATCH_OUTPUT_HINT = 'Na pasta de cada PDF, com "-assinado" no nome'
@@ -51,6 +55,8 @@ class AssinadorApp(tk.Tk):
 
         self.a1_file = tk.StringVar()
         self.a1_password = tk.StringVar()
+        self.a1_preview_cert = None
+        self.a1_preview_dirty = True
 
         self.a3_module = tk.StringVar()
         self.a3_token_label = tk.StringVar()
@@ -64,7 +70,9 @@ class AssinadorApp(tk.Tk):
 
         self.reason = tk.StringVar(value="Assinatura digital")
         self.location = tk.StringVar()
-        self.appearance = tk.StringVar(value="invisible")
+        self.preview_open = False
+        self.include_document_id = tk.BooleanVar(value=False)
+        self.appearance = tk.StringVar(value="footer")
         self.appearance_label = tk.StringVar(value=APPEARANCES["invisible"])
         self.status = tk.StringVar(value="Pronto.")
 
@@ -87,6 +95,8 @@ class AssinadorApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._close)
 
         self._build_ui()
+        for var in (self.a1_file, self.a1_password):
+            var.trace_add("write", self._invalidate_a1_preview)
         self._fit_window()
         self._refresh_tokens()
 
@@ -102,14 +112,22 @@ class AssinadorApp(tk.Tk):
         height = self.winfo_reqheight()
         self.cert_type.set(initial)
         self._toggle_cert_frames()
+        if self.preview_open:
+            width = min(self.winfo_screenwidth()-30, max(1100, width+280))
+            height = max(height, min(820, self.winfo_screenheight()-90))
         self.geometry(f"{width}x{height}")
-        self.minsize(self.winfo_reqwidth(), height)
+        self.minsize(min(width, self.winfo_reqwidth()), min(height, self.winfo_reqheight()))
 
     def _appearance_selected(self, _event=None):
         label = self.appearance_label.get()
         for key, text in APPEARANCES.items():
             if text == label:
                 self.appearance.set(key)
+                self.preview.show_mark = key == "manual"
+                if key == "manual" and self.pdf_in.get():
+                    self._show_preview()
+                else:
+                    self.preview.paint_mark()
 
     def _save_settings(self):
         try:
@@ -124,7 +142,10 @@ class AssinadorApp(tk.Tk):
     def _build_ui(self):
         pad = {"padx": 12, "pady": 6}
         outer = ttk.Frame(self)
-        outer.pack(fill="both", expand=True, padx=18, pady=18)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        outer.grid(row=0, column=0, sticky="nsew", padx=14, pady=12)
+        self.preview = Preview(self, self._mark_selected, self._preview_name, self._hide_preview)
 
         ttk.Label(outer, text="Assinador Digital para macOS",
                   font=("Helvetica", 20, "bold")).pack(anchor="w")
@@ -152,6 +173,9 @@ class AssinadorApp(tk.Tk):
         )
         self.out_button.grid(row=1, column=2, **pad)
 
+        ttk.Button(files_box, text="Prévia e posição…", command=self._show_preview).grid(
+            row=2, column=1, sticky="w", **pad)
+
         cert_box = ttk.LabelFrame(outer, text="Certificado")
         cert_box.pack(fill="x", pady=(0, 10))
 
@@ -177,9 +201,9 @@ class AssinadorApp(tk.Tk):
             row=0, column=2, **pad
         )
         ttk.Label(self.a1_frame, text="Senha").grid(row=1, column=0, sticky="w", **pad)
-        ttk.Entry(self.a1_frame, textvariable=self.a1_password, show="•", exportselection=False).grid(
-            row=1, column=1, sticky="ew", **pad
-        )
+        password_entry = ttk.Entry(self.a1_frame, textvariable=self.a1_password, show="•", exportselection=False)
+        password_entry.grid(row=1, column=1, sticky="ew", **pad)
+        password_entry.bind("<FocusOut>", self._read_a1_preview)
 
         self.a3_frame = ttk.Frame(cert_box)
         self.a3_frame.columnconfigure(1, weight=1)
@@ -187,7 +211,7 @@ class AssinadorApp(tk.Tk):
         ttk.Label(self.a3_frame, text="Certificados no Mac").grid(row=0, column=0, sticky="w", **pad)
         self.token_box = ttk.Combobox(self.a3_frame, state="readonly")
         self.token_box.grid(row=0, column=1, sticky="ew", **pad)
-        self.token_box.bind("<<ComboboxSelected>>", lambda _: self.a3_pin.set(""))
+        self.token_box.bind("<<ComboboxSelected>>", self._token_selected)
         self.refresh_button = ttk.Button(self.a3_frame, text="Atualizar", command=self._refresh_tokens)
         self.refresh_button.grid(row=0, column=2, **pad)
         ttk.Checkbutton(self.a3_frame, text="Configuração manual de driver PKCS#11",
@@ -237,6 +261,9 @@ class AssinadorApp(tk.Tk):
         appearance_box.grid(row=2, column=1, sticky="ew", **pad)
         appearance_box.bind("<<ComboboxSelected>>", self._appearance_selected)
 
+        ttk.Checkbutton(meta_box, text="Mostrar CPF/CNPJ do certificado no carimbo",
+                        variable=self.include_document_id, command=self.preview.paint_mark).grid(
+            row=3, column=1, sticky="w", **pad)
         bottom = ttk.Frame(outer)
         bottom.pack(fill="x", pady=(6, 0))
         ttk.Label(bottom, textvariable=self.status).pack(side="left")
@@ -250,9 +277,70 @@ class AssinadorApp(tk.Tk):
         )
         self.finder_button.pack(side="right", padx=(0, 8))
 
+    def _show_preview(self):
+        paths = self.batch_files or ([self.pdf_in.get().strip()] if self.pdf_in.get().strip() else [])
+        if not paths:
+            self._choose_pdf()
+            return
+        first = not self.preview_open
+        self.preview_open = True
+        self.columnconfigure(0, weight=0)
+        self.columnconfigure(1, weight=1)
+        self.preview.grid(row=0, column=1, sticky="nsew")
+        self.preview.show_mark = self.appearance.get() == "manual"
+        self.preview.load(paths)
+        if first:
+            self._fit_window()
+        self._read_a1_preview()
+
+    def _hide_preview(self):
+        self.preview_open = False
+        self.preview.grid_remove()
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=0)
+        self._fit_window()
+
+    def _mark_selected(self):
+        self.appearance.set("manual")
+        self.appearance_label.set(APPEARANCES["manual"])
+
+    def _invalidate_a1_preview(self, *_):
+        self.a1_preview_cert = None
+        self.a1_preview_dirty = True
+
+    def _read_a1_preview(self, _event=None):
+        if not self.a1_preview_dirty or not self.preview_open or self.cert_type.get() != "A1":
+            return
+        filename = Path(self.a1_file.get()).expanduser()
+        if not filename.is_file() or filename.suffix.lower() not in (".pfx", ".p12"):
+            return
+        from cryptography.hazmat.primitives.serialization import Encoding, pkcs12
+        from cryptography.exceptions import UnsupportedAlgorithm
+        self.a1_preview_dirty = False
+        try:
+            bundle = pkcs12.load_pkcs12(filename.read_bytes(), self.a1_password.get().encode() or None)
+            if bundle.cert:
+                self.a1_preview_cert = x509.Certificate.load(bundle.cert.certificate.public_bytes(Encoding.DER))
+        except (ValueError, OSError, UnsupportedAlgorithm):
+            self.a1_preview_cert = None
+        self.preview.paint_mark()
+
+    def _preview_name(self):
+        if self.cert_type.get() == "A1" and self.a1_preview_cert:
+            return display_name(self.a1_preview_cert, self.include_document_id.get()) or "Titular"
+        item = self._selected_token()
+        if self.cert_type.get() == "A3" and not self.manual_token.get() and item:
+            return display_name(x509.Certificate.load(item.der), self.include_document_id.get()) or "Titular"
+        return "Nome do titular"
+
+    def _token_selected(self, _event=None):
+        self.a3_pin.set("")
+        self.preview.paint_mark()
+
     def _choose_cert_type(self):
         self._auto_choose_token = False
         self._toggle_cert_frames()
+        self.preview.paint_mark()
 
     def _toggle_manual(self):
         self.a3_pin.set("")
@@ -308,6 +396,7 @@ class AssinadorApp(tk.Tk):
             self.cert_type.set("A3")
             self._toggle_cert_frames()
         self._auto_choose_token = False
+        self.preview.paint_mark()
 
     def _toggle_cert_frames(self):
         if self.cert_type.get() == "A1":
@@ -339,6 +428,7 @@ class AssinadorApp(tk.Tk):
             self.sign_button.configure(text="Assinar PDF")
             self.pdf_in.set(paths[0])
             self.pdf_out.set(str(output_for(paths[0])))
+            self._show_preview()
             return
         self.batch_files = paths
         self.batch_folder = ""
@@ -351,6 +441,7 @@ class AssinadorApp(tk.Tk):
         self.out_entry.configure(state="readonly")
         self.out_button.configure(text="Pasta…")
         self.sign_button.configure(text=f"Assinar {len(paths)} PDFs")
+        self._show_preview()
 
     def _choose_output(self):
         if self.batch_files:
@@ -433,6 +524,16 @@ class AssinadorApp(tk.Tk):
             messagebox.showerror(APP_TITLE, str(exc))
             return
 
+        if self.appearance.get() == "manual":
+            for src, _ in pairs:
+                if src.resolve() not in self.preview.marks:
+                    self._show_preview()
+                    idx = self.preview.paths.index(src.resolve())
+                    self.preview.documents.current(idx)
+                    self.preview.select_document()
+                    messagebox.showinfo(APP_TITLE, f"Marque a assinatura na prévia de {src.name}.")
+                    return
+
         selected = self._selected_token()
         if self.cert_type.get() == "A3" and not self.manual_token.get():
             if selected is None or not self.a3_pin.get():
@@ -454,6 +555,8 @@ class AssinadorApp(tk.Tk):
             reason=self.reason.get().strip(),
             location=self.location.get().strip(),
             appearance=self.appearance.get(),
+            placements=tuple(self.preview.marks.values()),
+            include_document_id=self.include_document_id.get(),
         )
         job = {"type": self.cert_type.get(), "pairs": pairs}
         if job["type"] == "A1":
