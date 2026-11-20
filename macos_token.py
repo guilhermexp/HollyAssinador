@@ -1,4 +1,4 @@
-"""Identidades de tokens expostas pelo Chaves do macOS (CryptoTokenKit)."""
+"""Identidades de assinatura nos chaveiros locais e em tokens CryptoTokenKit."""
 from __future__ import annotations
 
 import offline
@@ -31,29 +31,32 @@ class TokenCertificate:
         return f"{name} · vence em {cert.not_valid_after:%d/%m/%Y}"
 
 
-def _items(item_class, context, token_id=None):
+def _items(item_class, context, token_id=None, *, keychains=None):
     query = {
         sec.kSecClass: item_class,
-        sec.kSecAttrAccessGroup: sec.kSecAttrAccessGroupToken,
         sec.kSecUseAuthenticationContext: context,
         sec.kSecMatchLimit: sec.kSecMatchLimitAll,
         sec.kSecReturnRef: True,
         sec.kSecReturnAttributes: True,
     }
+    if keychains is None:
+        query[sec.kSecAttrAccessGroup] = sec.kSecAttrAccessGroupToken
+    else:
+        query[sec.kSecMatchSearchList] = keychains
     if token_id is not None:
         query[sec.kSecAttrTokenID] = token_id
     status, rows = sec.SecItemCopyMatching(query, None)
     if status == sec.errSecItemNotFound:
         return []
     if status != sec.errSecSuccess:
-        raise SigningError("O macOS não conseguiu consultar os certificados do token.")
+        raise SigningError("O macOS não conseguiu consultar os certificados no Chaves.")
     return rows
 
 
-def _identities(context, token_id=None):
-    for row in _items(sec.kSecClassIdentity, context, token_id):
+def _identities(context, token_id=None, *, keychains=None):
+    for row in _items(sec.kSecClassIdentity, context, token_id, keychains=keychains):
         token = row.get(sec.kSecAttrTokenID)
-        if not token or not row.get(sec.kSecAttrCanSign, True):
+        if bool(token) != (keychains is None) or not row.get(sec.kSecAttrCanSign, True):
             continue
         identity = row[sec.kSecValueRef]
         status, ref = sec.SecIdentityCopyCertificate(identity, None)
@@ -66,8 +69,13 @@ def _identities(context, token_id=None):
             {"digital_signature", "non_repudiation"}
         )):
             continue
+        eku = cert.extended_key_usage_value
+        if keychains is not None and eku is not None and set(eku.native) <= {
+            "code_signing", "time_stamping", "ocsp_signing", "server_auth",
+        }:
+            continue
         if cert.public_key.algorithm in ("rsa", "ec"):
-            yield TokenCertificate(str(token), der), identity
+            yield TokenCertificate(str(token or ""), der), identity
 
 
 def discover_tokens():
@@ -75,6 +83,61 @@ def discover_tokens():
     context.setInteractionNotAllowed_(True)
     try:
         return sorted({item for item, _ in _identities(context)}, key=lambda c: (c.title, c.der, c.token_id))
+    finally:
+        context.invalidate()
+
+
+def _file_keychains():
+    status, keychains = sec.SecKeychainCopySearchList(None)
+    if status != sec.errSecSuccess:
+        raise SigningError("O macOS não conseguiu listar os chaveiros.")
+    return keychains
+
+
+def discover_keychain_a1():
+    context = LAContext.new()
+    context.setInteractionNotAllowed_(True)
+    try:
+        items = {item for item, _ in _identities(context, keychains=_file_keychains())}
+        return sorted(items, key=lambda item: (item.title, item.der))
+    finally:
+        context.invalidate()
+
+
+def _local_issuer_chain(cert, context, keychains):
+    # Só adiciona emissores da identidade selecionada ao PDF.
+    candidates = []
+    for row in _items(sec.kSecClassCertificate, context, keychains=keychains):
+        issuer = x509.Certificate.load(bytes(sec.SecCertificateCopyData(row[sec.kSecValueRef])))
+        if issuer.ca:
+            candidates.append(issuer)
+    chain = []
+    while cert.issuer != cert.subject:
+        parent = next((c for c in candidates if c.subject == cert.issuer and
+                       (not cert.authority_key_identifier or c.key_identifier == cert.authority_key_identifier)), None)
+        if parent is None:
+            break
+        candidates.remove(parent)
+        chain.append(parent)
+        cert = parent
+    return chain
+
+
+@contextmanager
+def open_keychain_a1(selected):
+    context = LAContext.new()
+    try:
+        keychains = _file_keychains()
+        for item, identity in _identities(context, keychains=keychains):
+            if item == selected:
+                break
+        else:
+            raise SigningError("O certificado selecionado não está mais disponível no Chaves.")
+        cert = x509.Certificate.load(selected.der)
+        status, key = sec.SecIdentityCopyPrivateKey(identity, None)
+        if status != sec.errSecSuccess:
+            raise SigningError("O Chaves não liberou a chave privada selecionada.")
+        yield MacTokenSigner(cert, key, _local_issuer_chain(cert, context, keychains))
     finally:
         context.invalidate()
 
@@ -100,7 +163,7 @@ class MacTokenSigner(Signer):
                      else sec.kSecKeyAlgorithmECDSASignatureMessageX962SHA256)
         signature, _ = sec.SecKeyCreateSignature(self._key, algorithm, data, None)
         if signature is None:
-            raise SigningError("O token não autorizou a assinatura. Confira a conexão e o estado do PIN no programa do fabricante.")
+            raise SigningError("O macOS não autorizou a assinatura. Confira a permissão no Chaves ou o estado do token.")
         self._failed = False
         return bytes(signature)
 

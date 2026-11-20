@@ -15,7 +15,8 @@ try:
     from preview import Preview
     from signer_core import display_name
     from asn1crypto import x509
-    from macos_token import discover_tokens, open_mac_token
+    from a1_files import discover_a1_files
+    from macos_token import TokenCertificate, discover_keychain_a1, discover_tokens, open_keychain_a1, open_mac_token
     from signer_core import (
         BatchOutcome,
         SignatureOptions,
@@ -53,6 +54,9 @@ class AssinadorApp(tk.Tk):
         self.pdf_out = tk.StringVar()
         self.cert_type = tk.StringVar(value="A1")
 
+        self.a1_choices = {}
+        self.a1_search_started = False
+        self.a1_hint = tk.StringVar()
         self.a1_file = tk.StringVar()
         self.a1_password = tk.StringVar()
         self.a1_preview_cert = None
@@ -89,7 +93,9 @@ class AssinadorApp(tk.Tk):
             "cert_type": self.cert_type,
             "appearance": self.appearance,
         }
-        for key, value in settings.load().items():
+        saved = settings.load()
+        self._auto_choose_token = "cert_type" not in saved
+        for key, value in saved.items():
             self._remembered[key].set(value)
         self.appearance_label.set(APPEARANCES[self.appearance.get()])
         self.protocol("WM_DELETE_WINDOW", self._close)
@@ -97,8 +103,11 @@ class AssinadorApp(tk.Tk):
         self._build_ui()
         for var in (self.a1_file, self.a1_password):
             var.trace_add("write", self._invalidate_a1_preview)
+        self.a1_file.trace_add("write", self._a1_changed)
         self._fit_window()
         self._refresh_tokens()
+        if self.cert_type.get() == "A1":
+            self._refresh_a1()
 
     def _fit_window(self):
         # A altura que o Tk exige varia com a versão (o Tk 9 usa linhas maiores),
@@ -182,7 +191,7 @@ class AssinadorApp(tk.Tk):
         choose = ttk.Frame(cert_box)
         choose.pack(fill="x", padx=12, pady=(10, 2))
         ttk.Radiobutton(
-            choose, text="A1 (.p12 / .pfx)", variable=self.cert_type,
+            choose, text="A1 (Chaves / arquivo)", variable=self.cert_type,
             value="A1", command=self._choose_cert_type
         ).pack(side="left")
         ttk.Radiobutton(
@@ -194,16 +203,19 @@ class AssinadorApp(tk.Tk):
         self.a1_frame.columnconfigure(1, weight=1)
 
         ttk.Label(self.a1_frame, text="Certificado").grid(row=0, column=0, sticky="w", **pad)
-        ttk.Entry(self.a1_frame, textvariable=self.a1_file).grid(
-            row=0, column=1, sticky="ew", **pad
-        )
-        ttk.Button(self.a1_frame, text="Selecionar…", command=self._choose_a1).grid(
-            row=0, column=2, **pad
-        )
-        ttk.Label(self.a1_frame, text="Senha").grid(row=1, column=0, sticky="w", **pad)
-        password_entry = ttk.Entry(self.a1_frame, textvariable=self.a1_password, show="•", exportselection=False)
-        password_entry.grid(row=1, column=1, sticky="ew", **pad)
-        password_entry.bind("<FocusOut>", self._read_a1_preview)
+        self.a1_box = ttk.Combobox(self.a1_frame, textvariable=self.a1_file)
+        self.a1_box.grid(row=0, column=1, sticky="ew", **pad)
+        self.a1_refresh = ttk.Button(self.a1_frame, text="Atualizar", command=self._refresh_a1)
+        self.a1_refresh.grid(row=0, column=2, **pad)
+        ttk.Label(self.a1_frame, textvariable=self.a1_hint, wraplength=290).grid(
+            row=1, column=1, sticky="w", **pad)
+        ttk.Button(self.a1_frame, text="Abrir arquivo…", command=self._choose_a1).grid(
+            row=1, column=2, **pad)
+        ttk.Label(self.a1_frame, text="Senha").grid(row=2, column=0, sticky="w", **pad)
+        self.password_entry = ttk.Entry(self.a1_frame, textvariable=self.a1_password,
+                                        show="•", exportselection=False)
+        self.password_entry.grid(row=2, column=1, sticky="ew", **pad)
+        self.password_entry.bind("<FocusOut>", self._read_a1_preview)
 
         self.a3_frame = ttk.Frame(cert_box)
         self.a3_frame.columnconfigure(1, weight=1)
@@ -304,6 +316,82 @@ class AssinadorApp(tk.Tk):
         self.appearance.set("manual")
         self.appearance_label.set(APPEARANCES["manual"])
 
+    def _a1_source(self):
+        label = self.a1_file.get().strip()
+        if label in self.a1_choices:
+            return self.a1_choices[label]
+        return Path(label).expanduser() if label else None
+
+    def _a1_changed(self, *_):
+        self.a1_password.set("")
+        installed = isinstance(self._a1_source(), TokenCertificate)
+        self.password_entry.configure(state="disabled" if installed else "normal")
+        if installed:
+            self.a1_hint.set("O macOS pode pedir autorização ao assinar.")
+        elif self.a1_file.get():
+            self.a1_hint.set("Use a senha do arquivo PFX ou P12.")
+        self.preview.paint_mark()
+
+    def _refresh_a1(self):
+        self.a1_search_started = True
+        self.a1_refresh.configure(state="disabled")
+        self.a1_hint.set("Procurando no Chaves e nas pastas do usuário…")
+        events = queue.SimpleQueue()
+
+        def discover():
+            identities, files, failed = [], [], []
+            try:
+                identities = discover_keychain_a1()
+            except Exception:
+                failed.append("Chaves")
+            try:
+                files = discover_a1_files()
+            except Exception:
+                failed.append("arquivos")
+            events.put((identities, files, failed))
+
+        threading.Thread(target=discover, daemon=True).start()
+        self.after(40, self._receive_a1, events)
+
+    def _receive_a1(self, events):
+        try:
+            identities, files, failed = events.get_nowait()
+        except queue.Empty:
+            self.after(40, self._receive_a1, events)
+            return
+        previous = self._a1_source()
+        was_listed = self.a1_file.get() in self.a1_choices
+        titles = [item.title for item in identities]
+        choices = {}
+        for item, title in zip(identities, titles):
+            suffix = f" · {item.short_id}" if titles.count(title) > 1 else ""
+            choices[f"Chaves · {title}{suffix}"] = item
+        for path in files:
+            folder = path.parent
+            if folder.is_relative_to(Path.home()):
+                folder = Path("~") / folder.relative_to(Path.home())
+            choices[f"Arquivo · {path.name} ({folder})"] = path
+        self.a1_choices = choices
+        self.a1_box.configure(values=tuple(choices))
+        self.a1_refresh.configure(state="normal")
+        label = next((name for name, item in choices.items() if item == previous), None)
+        if not previous and len(choices) == 1 and not failed:
+            label = next(iter(choices))
+        if label is not None and (was_listed or not previous) and label != self.a1_file.get():
+            self.a1_file.set(label)
+        elif was_listed and label is None:
+            self.a1_file.set("")
+        if failed:
+            self.a1_hint.set("Consulta incompleta: " + ", ".join(failed) + ".")
+        elif isinstance(self._a1_source(), TokenCertificate):
+            self.a1_hint.set("O macOS pode pedir autorização ao assinar.")
+        elif self._a1_source():
+            self.a1_hint.set("Use a senha do arquivo PFX ou P12.")
+        elif choices:
+            self.a1_hint.set("Escolha um certificado na lista.")
+        else:
+            self.a1_hint.set("Nenhum A1 encontrado. Você pode abrir um arquivo.")
+
     def _invalidate_a1_preview(self, *_):
         self.a1_preview_cert = None
         self.a1_preview_dirty = True
@@ -311,8 +399,8 @@ class AssinadorApp(tk.Tk):
     def _read_a1_preview(self, _event=None):
         if not self.a1_preview_dirty or not self.preview_open or self.cert_type.get() != "A1":
             return
-        filename = Path(self.a1_file.get()).expanduser()
-        if not filename.is_file() or filename.suffix.lower() not in (".pfx", ".p12"):
+        filename = self._a1_source()
+        if not isinstance(filename, Path) or not filename.is_file() or filename.suffix.lower() not in (".pfx", ".p12"):
             return
         from cryptography.hazmat.primitives.serialization import Encoding, pkcs12
         from cryptography.exceptions import UnsupportedAlgorithm
@@ -326,8 +414,10 @@ class AssinadorApp(tk.Tk):
         self.preview.paint_mark()
 
     def _preview_name(self):
-        if self.cert_type.get() == "A1" and self.a1_preview_cert:
-            return display_name(self.a1_preview_cert, self.include_document_id.get()) or "Titular"
+        if self.cert_type.get() == "A1":
+            source = self._a1_source()
+            cert = x509.Certificate.load(source.der) if isinstance(source, TokenCertificate) else self.a1_preview_cert
+            return display_name(cert, self.include_document_id.get()) or "Nome do titular"
         item = self._selected_token()
         if self.cert_type.get() == "A3" and not self.manual_token.get() and item:
             return display_name(x509.Certificate.load(item.der), self.include_document_id.get()) or "Titular"
@@ -338,6 +428,8 @@ class AssinadorApp(tk.Tk):
         self.preview.paint_mark()
 
     def _choose_cert_type(self):
+        if self.cert_type.get() == "A1" and not self.a1_search_started:
+            self._refresh_a1()
         self._auto_choose_token = False
         self._toggle_cert_frames()
         self.preview.paint_mark()
@@ -535,6 +627,9 @@ class AssinadorApp(tk.Tk):
                     return
 
         selected = self._selected_token()
+        if self.cert_type.get() == "A1" and not self._a1_source():
+            messagebox.showerror(APP_TITLE, "Selecione um certificado A1 no Chaves ou um arquivo PFX/P12.")
+            return
         if self.cert_type.get() == "A3" and not self.manual_token.get():
             if selected is None or not self.a3_pin.get():
                 messagebox.showerror(APP_TITLE, "Selecione o certificado conectado e digite o PIN.")
@@ -560,7 +655,11 @@ class AssinadorApp(tk.Tk):
         )
         job = {"type": self.cert_type.get(), "pairs": pairs}
         if job["type"] == "A1":
-            job.update(a1_file=self.a1_file.get(), a1_password=self.a1_password.get())
+            source = self._a1_source()
+            if isinstance(source, TokenCertificate):
+                job["keychain_identity"] = source
+            else:
+                job.update(a1_file=str(source), a1_password=self.a1_password.get())
         elif not self.manual_token.get():
             job.update(token=selected, a3_pin=self.a3_pin.get())
         else:
@@ -601,7 +700,10 @@ class AssinadorApp(tk.Tk):
                 events.put(("progress", text))
 
         try:
-            if job["type"] == "A1":
+            if "keychain_identity" in job:
+                with open_keychain_a1(job["keychain_identity"]) as signer:
+                    outcomes = sign_batch(signer, job["pairs"], opts, progress)
+            elif job["type"] == "A1":
                 signer = load_a1(job["a1_file"], job.pop("a1_password"))
                 outcomes = sign_batch(signer, job["pairs"], opts, progress)
             elif "token" in job:

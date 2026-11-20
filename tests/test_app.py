@@ -27,7 +27,7 @@ def setUpModule():
     global _JANELA
     _PATCH_CONFIG.start()
     try:
-        with mock.patch.object(app.AssinadorApp, "_refresh_tokens"):
+        with mock.patch.object(app.AssinadorApp, "_refresh_tokens"), mock.patch.object(app.AssinadorApp, "_refresh_a1"):
             _JANELA = app.AssinadorApp()
     except tkinter.TclError:
         _JANELA = None
@@ -261,6 +261,32 @@ class JanelaTests(unittest.TestCase):
         self.assertEqual(j.appearance.get(), "manual")
         self.assertEqual(tuple(round(v) for v in panel.pixel_rect()), (30, 45, 205, 110))
         self.assertEqual(panel.marks[src].page, 0)
+
+    def test_escolha_a1_separa_chaves_e_arquivo_e_limpa_senha(self):
+        from queue import SimpleQueue
+        cert = apoio.asn1(apoio.certificado(nome="Titular do teste"))
+        item = app.TokenCertificate("", cert.dump())
+        arquivo = self.pasta / "local.pfx"
+        j = self.janela
+        j.a1_file.set("")
+        events = SimpleQueue()
+        events.put(([item], [arquivo], []))
+        j._receive_a1(events)
+        labels = j.a1_box.cget("values")
+        self.assertEqual(len(labels), 2)
+        self.assertEqual(j.a1_file.get(), "")
+        j.a1_box.current(1)
+        self.assertEqual(j._a1_source(), arquivo)
+        j.a1_password.set("senha fictícia")
+        j.a1_box.current(0)
+        self.assertEqual(j._a1_source(), item)
+        self.assertEqual(j.a1_password.get(), "")
+        self.assertEqual(str(j.password_entry["state"]), "disabled")
+        self.assertEqual(j._preview_name(), "Titular do teste")
+        events.put(([], [arquivo], []))
+        j._receive_a1(events)
+        self.assertIsNone(j._a1_source())
+        self.assertEqual(str(j.password_entry["state"]), "normal")
 
     def test_mostrar_no_finder(self):
         assinado = apoio.pdf(self.pasta / "x-assinado.pdf")

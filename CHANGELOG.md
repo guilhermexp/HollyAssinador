@@ -1,5 +1,9 @@
 # Histórico de versões
 
+## 0.5.0
+
+A lista A1 inclui identidades de assinatura instaladas no Chaves e arquivos PFX/P12 encontrados localmente.
+
 ## 0.4.0
 
 Prévia integrada com seleção de página e área, movimento e redimensionamento por documento. Carimbo vetorial em duas colunas e exibição opcional do CPF/CNPJ do certificado.
