@@ -1,26 +1,17 @@
 """Configurações lembradas entre execuções.
 
-Só guarda dados não sensíveis (caminhos, labels, motivo, local, TSA). Senha do
-A1 e PIN do A3 nunca são gravados.
+Guarda apenas o tipo de certificado e a aparência.
 """
 from __future__ import annotations
 
 import json
-import os
+import tempfile
 from pathlib import Path
 
-SETTINGS_PATH = Path.home() / "Library" / "Application Support" / "HollyAssinador" / "config.json"
+SETTINGS_PATH = Path.home() / "Library" / "Application Support" / "HollyAssinadorOffline" / "config.json"
 
 FIELDS: dict[str, type] = {
     "cert_type": str,
-    "a1_file": str,
-    "a3_module": str,
-    "a3_token_label": str,
-    "a3_cert_label": str,
-    "a3_key_label": str,
-    "reason": str,
-    "location": str,
-    "tsa_url": str,
     "appearance": str,
 }
 
@@ -49,7 +40,11 @@ def save(values: dict, path: Path | None = None) -> None:
     path = path or SETTINGS_PATH
     data = {key: values[key] for key in FIELDS if key in values}
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    tmp.replace(path)
+    handle = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False)
+    tmp = Path(handle.name)
+    try:
+        with handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)

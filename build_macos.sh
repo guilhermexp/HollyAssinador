@@ -4,8 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./_python.sh
 
-APP_NAME="HollyAssinador"
-BUNDLE_ID="com.holly.assinador"
+APP_NAME="HollyAssinadorOffline"
+BUNDLE_ID="io.github.guilhermexp.hollyassinador.offline"
 APP_PATH="dist/${APP_NAME}.app"
 VERSION="$(tr -d '[:space:]' < VERSION)"
 
@@ -19,22 +19,14 @@ if [[ ! -d ".venv" ]]; then
 fi
 
 source .venv/bin/activate
-if ! python -c 'import sys, tkinter; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
-  echo "O .venv foi criado com um Python sem tkinter (ou anterior ao 3.10)." >&2
+if ! python -c 'import sys, tkinter; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
+  echo "O .venv foi criado com um Python sem tkinter (ou anterior ao 3.11)." >&2
   echo "Apague a pasta .venv e rode de novo." >&2
   exit 1
 fi
 echo "Python: $(python -c 'import sys; print(sys.version.split()[0])')"
 
-python -m pip install --upgrade pip wheel
-python -m pip install -r requirements.txt
-
-# O Finder pode recriar o .DS_Store enquanto a pasta é apagada; tenta mais de uma vez.
-for _ in 1 2 3; do
-  rm -rf build dist "${APP_NAME}.spec" 2>/dev/null && break
-  sleep 1
-done
-rm -rf build dist "${APP_NAME}.spec"
+python -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements.lock
 
 pyinstaller \
   --noconfirm \

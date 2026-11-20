@@ -18,7 +18,6 @@ from cryptography.x509.oid import NameOID  # noqa: E402
 from selftest import _pdf_bytes  # noqa: E402
 
 SENHA = "teste"
-TSA_FORA_DO_AR = "http://127.0.0.1:9/"  # porta "discard": a conexão é recusada na hora
 
 _CHAVE = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 

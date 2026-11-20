@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import offline  # ativa o bloqueio antes das bibliotecas de terceiros
+
 import os
 import re
 import tempfile
@@ -13,7 +15,7 @@ from typing import Optional
 from pyhanko import stamp
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.text import TextBoxStyle
-from pyhanko.sign import fields, signers, timestamps
+from pyhanko.sign import fields, signers
 from pyhanko.sign.fields import SigSeedSubFilter
 
 
@@ -21,7 +23,6 @@ from pyhanko.sign.fields import SigSeedSubFilter
 class SignatureOptions:
     reason: str = ""
     location: str = ""
-    tsa_url: str = ""
     appearance: str = "invisible"  # "invisible" ou "footer" (carimbo no rodapé)
 
 
@@ -95,12 +96,6 @@ def _metadata(field_name: str, opts: SignatureOptions) -> signers.PdfSignatureMe
         reason=opts.reason or None,
         location=opts.location or None,
     )
-
-
-def _timestamper(opts: SignatureOptions):
-    if not opts.tsa_url.strip():
-        return None
-    return timestamps.HTTPTimeStamper(url=opts.tsa_url.strip())
 
 
 def _stamp_style():
@@ -184,14 +179,7 @@ def friendly_error(exc: BaseException) -> str:
     import pkcs11.exceptions as p11
     from pyhanko.pdf_utils.crypt.api import PdfKeyNotAvailableError
     from pyhanko.pdf_utils.misc import PdfReadError
-    from pyhanko.sign.timestamps.common_utils import TimestampRequestError
 
-    if isinstance(exc, TimestampRequestError):
-        return (
-            "Não foi possível obter o carimbo do tempo na TSA informada (endereço "
-            "fora do ar, errado ou sem internet). Nada foi gravado. Confira a URL da "
-            "TSA ou deixe o campo vazio para assinar sem ela."
-        )
     if isinstance(exc, PdfKeyNotAvailableError):
         return (
             "Este PDF está protegido por senha. Remova a proteção (ou gere o PDF de "
@@ -212,7 +200,7 @@ def friendly_error(exc: BaseException) -> str:
             "Sem permissão para ler ou gravar o arquivo. Confira se a pasta permite "
             "gravação e se o macOS deu ao HollyAssinador acesso a ela."
         )
-    return f"Falha na assinatura: {exc}"
+    return "Falha na assinatura. Confira o PDF e a disponibilidade do certificado."
 
 
 def same_file(a: Path, b: Path) -> bool:
@@ -255,6 +243,8 @@ def sign_file(
         raise SigningError(f"PDF de entrada não encontrado: {src}")
     if src.suffix.lower() != ".pdf":
         raise SigningError("O arquivo de entrada deve ser PDF.")
+    if dst.suffix.lower() != ".pdf":
+        raise SigningError("O arquivo de saída deve ser PDF.")
     if same_file(src, dst):
         raise SigningError("Escolha um arquivo de saída diferente do PDF original.")
 
@@ -262,7 +252,6 @@ def sign_file(
 
     field_name = _field_name()
     meta = _metadata(field_name, opts)
-    tsa = _timestamper(opts)
 
     box = _footer_box(src) if opts.appearance == "footer" else None
     if opts.appearance == "footer" and box is None:
@@ -291,7 +280,6 @@ def sign_file(
             pdf_signer = signers.PdfSigner(
                 signature_meta=meta,
                 signer=signer,
-                timestamper=tsa,
                 stamp_style=_stamp_style() if box else None,
                 new_field_spec=_field_spec(field_name, box),
             )
@@ -300,7 +288,6 @@ def sign_file(
             )
         if tmp.stat().st_size == 0:
             raise SigningError("A biblioteca não produziu um PDF assinado.")
-        os.chmod(tmp, 0o644)
         os.replace(tmp, dst)
     except SigningError:
         _discard(tmp)

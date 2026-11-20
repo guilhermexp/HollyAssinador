@@ -1,5 +1,10 @@
 # Histórico de versões
 
+## 0.2.1 — fork offline
+
+Bloqueio de rede no macOS, remoção da TSA, PDFs assinados com permissão 0600 e preferências limitadas a tipo de certificado e aparência. O build verifica os hashes das dependências. O autoteste exercita o bloqueio de rede e verifica a assinatura A1.
+
+
 ## 0.2.0 — 2026-11-16
 
 ### Correções

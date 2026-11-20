@@ -1,122 +1,43 @@
-<p align="center">
-  <img src="assets/icon_1024.png" alt="Logo do HollyAssinador" width="140">
-</p>
+# HollyAssinador Offline
 
-<h1 align="center">HollyAssinador</h1>
+Edição para testes em macOS do [HollyAssinador](https://github.com/HollyGM/HollyAssinador), derivada do commit `7ba9fa6`. Assina PDFs individualmente ou em lote com certificado A1 (PFX/P12) ou token A3 (PKCS#11). Usa PAdES com SHA-256 e oferece assinatura invisível ou carimbo visual no rodapé.
 
-<p align="center">Assinador digital de PDF para macOS: PAdES com certificado A1 (arquivo) ou A3 (token/cartão), tudo local.</p>
+## Gerar e abrir o aplicativo
 
-> **Parte da suíte Holly**  
-> Ferramentas local-first para texto, documentos e mídia, com privacidade por padrão e segurança verificável.  
-> [HollyOCR](https://github.com/HollyGM/HollyOCR) · [HollyTranscrição](https://github.com/HollyGM/HollyTranscricao) · [HollyCorretor](https://github.com/HollyGM/HollyCorretor) · [HollyOptimizer](https://github.com/HollyGM/HollyOptimizer) · [Texto em Áudio](https://github.com/HollyGM/HollyTextoEmAudio) (voz online ou local)
-
-<p align="center">
-  <img src="docs/screenshot.png" alt="Interface do HollyAssinador" width="620">
-</p>
-
-## O que faz
-
-- Assinatura criptográfica **PAdES** (SHA-256) gravada dentro do PDF, de forma incremental: o documento original não é reescrito e assinaturas anteriores continuam válidas.
-- Certificado **A1** (`.p12` / `.pfx`) ou **A3** via **PKCS#11** (token ou cartão).
-- **Aparência da assinatura:** invisível (padrão) ou um carimbo pequeno no rodapé da última página, **sempre em área livre**, sem cobrir o texto. O carimbo mostra o nome do titular **sem o CPF/CNPJ** que o padrão ICP-Brasil põe no nome do certificado.
-- **Vários PDFs de uma vez:** selecione todos no "Abrir…"; com A3, o PIN é digitado uma vez para o lote inteiro.
-- **Mostrar no Finder** ao terminar, com o PDF assinado já selecionado.
-- **Confere a validade do certificado:** recusa certificado vencido (a assinatura seria rejeitada) e avisa quando faltam menos de 30 dias para vencer.
-- Motivo, local e carimbo do tempo (RFC 3161) opcional por URL de TSA.
-- Lembra as configurações (caminhos e labels do token), **nunca a senha nem o PIN**.
-
-## Privacidade e segurança
-
-- Tudo roda no seu Mac. O app **só usa a rede se você informar uma TSA**; o autoteste completo de assinatura foi executado com toda a rede bloqueada pelo sistema.
-- A chave do A3 nunca sai do token; a do A1 só é carregada durante a assinatura.
-- Senha do A1 e PIN do A3 não são gravados nem registrados em log, e o campo é **apagado a cada assinatura**: quem chegar ao Mac com o app aberto não assina sem digitar de novo.
-- O PDF assinado é gravado primeiro num arquivo temporário e só no fim substitui o destino. Se a assinatura falhar no meio (TSA fora do ar, token desconectado), um arquivo que já existisse com o mesmo nome continua intacto. Antes de substituir um arquivo existente, o app pergunta.
-- PIN errado, PIN bloqueado e token ausente têm mensagens diferentes, para você não insistir num PIN errado até bloquear o token.
-- O `.gitignore` do projeto impede que certificados e chaves (`.p12`, `.pfx`, `.pem`, `.key`...) sejam versionados por engano. Veja também o [SECURITY.md](SECURITY.md).
-
-## O que o app **não** faz
-
-- Não valida a cadeia de certificação ICP-Brasil nem gera assinaturas com política ICP-Brasil (AD-RB/AD-RT) ou LTV. A assinatura é PAdES básica, com carimbo do tempo se uma TSA for informada.
-- Não integra com navegador. Uma integração web precisaria de autenticação forte, controle de `Origin` e confirmação do usuário a cada documento; não exponha uma porta local que assine sem isso.
-- O carimbo visível só vai na última página e é desativado (a assinatura sai invisível, com aviso) se não houver área livre ou se a página estiver girada.
-- Só macOS. Desenvolvido em Apple Silicon.
-- Projeto independente: sem vínculo com tribunais, ITI/ICP-Brasil, Adobe ou fabricantes de token. Não é assessoria jurídica; confira se o seu destino aceita o tipo de assinatura.
-
-## Instalação
-
-Ainda não há binário publicado. Gere o aplicativo no seu Mac:
+Use macOS com Python 3.11+ e Tkinter. O ambiente de referência é macOS em Apple Silicon com Python 3.12.
 
 ```bash
-git clone https://github.com/HollyGM/HollyAssinador.git
+git clone https://github.com/guilhermexp/HollyAssinador.git
 cd HollyAssinador
 ./build_macos.sh
+open dist/HollyAssinadorOffline.app
 ```
 
-O app fica em `dist/HollyAssinador.app`; arraste-o para `/Applications`. Para testar sem gerar o `.app`: `./run_dev.sh`.
+A preparação pode acessar o índice de pacotes Python. O instalador exige wheels com versão e hash listados em `requirements.lock`. O build verifica a assinatura ad hoc do pacote e executa o autoteste. A assinatura ad hoc permite testar o aplicativo no Mac em que foi gerado. O pacote não é notarizado.
 
-**Python:** precisa de 3.10+ **com tkinter**. O `python3` mais novo do Homebrew (3.13+) não inclui tkinter; os scripts escolhem sozinhos um Python adequado, e você pode instalar um com `brew install python@3.12 python-tk@3.12`. Para forçar um: `PYTHON_BIN=/caminho/python3.12 ./build_macos.sh`.
+Para repetir a abertura pela árvore de desenvolvimento, execute `./run_dev.sh` após o build. O script usa o ambiente já preparado.
 
-**Gatekeeper:** o app é assinado apenas de forma *ad hoc*. Ele abre no Mac onde foi gerado; em outros, o Gatekeeper vai reclamar. Para distribuir, assine com Developer ID e notarize (`codesign`, `notarytool`, `stapler`).
+## Testar uma assinatura
 
-## Como usar
+1. Escolha um PDF fictício em uma pasta local privada fora de serviços de sincronização.
+2. Para A1, selecione um PFX ou P12 de teste e digite a senha. Para A3, selecione o módulo PKCS#11 oficial do fabricante, indique os rótulos e digite o PIN. O programa abre uma sessão por lote.
+3. Escolha a aparência e clique em **Assinar PDF**. A cópia assinada tem permissão de leitura e escrita apenas para o proprietário. Um arquivo de saída já existente exige confirmação na interface.
 
-### Certificado A1
+O PDF incorpora o certificado público do titular para permitir a verificação da assinatura. Isso pode identificar o titular a quem receber o documento. A hora do carimbo visual vem do Mac. Esta edição não consulta autoridades de carimbo do tempo ou de revogação e não verifica a cadeia ICP-Brasil.
 
-1. Escolha o PDF e o nome do arquivo assinado.
-2. Selecione `A1`, o arquivo `.p12`/`.pfx` e digite a senha.
-3. Clique em **Assinar PDF**.
+## Proteções e testes
 
-### Vários PDFs de uma vez
-
-No **Abrir…**, selecione vários PDFs (⌘-clique ou ⇧-clique). Cada um é salvo como `nome-assinado.pdf` na pasta do original; para juntar todos numa pasta só, use o botão **Pasta…**. Um PDF com problema não interrompe os outros: no fim, o app mostra quantos foram assinados e por que algum ficou de fora. O app recusa o lote se dois PDFs fossem gerar o mesmo nome de saída.
-
-### Certificado A3 (token/cartão)
-
-Informe o módulo PKCS#11 do fabricante (`.dylib`), o *token label* e o *certificate label*. O *key label* pode ficar vazio: a chave privada é localizada pelo ID do certificado (convenção do PKCS#11). O PIN é digitado a cada assinatura (ou a cada lote) e apagado do campo em seguida.
-
-Locais comuns do módulo: `/Library/Frameworks/`, `/Library/Application Support/`, `/usr/local/lib/`, `/opt/homebrew/lib/`. Tokens SafeNet eToken com o SafeNet Authentication Client usam `/usr/local/lib/libeTPkcs11.dylib`.
-
-Para descobrir os labels, conecte o token e rode:
+O processo aplica uma política de rede do macOS antes de carregar as bibliotecas de assinatura ou o driver do token. Se a política falhar, o programa encerra antes de pedir credenciais. O diagnóstico `probe_pkcs11.py` usa a mesma proteção. Consulte os limites em [SECURITY.md](SECURITY.md).
 
 ```bash
-source .venv/bin/activate
-python probe_pkcs11.py "/caminho/do/modulo.dylib"
+./dist/HollyAssinadorOffline.app/Contents/MacOS/HollyAssinadorOffline --self-test
+.venv/bin/python -m unittest discover -s tests -t . -v
 ```
 
-### Aparência da assinatura
+O autoteste confere o bloqueio TCP e UDP em IPv4 e IPv6, gera um A1 temporário, assina um PDF e verifica sua integridade. Para identificar os rótulos em um token de teste, use `.venv/bin/python probe_pkcs11.py "/caminho/para/modulo.dylib"`.
 
-- **Invisível (padrão):** nada é desenhado no PDF. Leitores como o Adobe Acrobat mostram a barra "Assinado e todas as assinaturas são válidas" e o painel de assinaturas.
-- **Carimbo no rodapé:** o app renderiza a última página, procura um retângulo sem conteúdo no quarto inferior (alinhado à margem do texto, acima do número de página) e coloca ali o carimbo. Uma segunda assinatura visível não cobre a primeira.
-
-A representação visual não substitui a assinatura criptográfica: quem garante integridade e autenticidade é a assinatura PAdES embutida no PDF.
-
-### Carimbo do tempo (TSA)
-
-Se você informar a URL de uma TSA compatível com RFC 3161, o app solicita o carimbo do tempo na assinatura. Deixe vazio para a assinatura PAdES básica.
-
-### PDFs com referências cruzadas híbridas
-
-Alguns geradores (por exemplo, o Word ao exportar PDF) produzem arquivos com tabela xref clássica + `/XRefStm`. Por segurança, o pyHanko recusa assiná-los no modo estrito. O app tenta primeiro no modo estrito e **só nesse caso** assina em modo tolerante, avisando na mensagem de sucesso. Alguns validadores estritos (inclusive o pyHanko em modo estrito) podem recusar validar o resultado.
-
-## Configurações lembradas
-
-Ficam em `~/Library/Application Support/HollyAssinador/config.json` (permissão 600): caminhos, labels do A3, motivo, local, TSA, tipo de certificado e aparência. Apague o arquivo para voltar ao padrão.
-
-## Para quem quer ajudar
-
-Contribuições são bem-vindas: issues, correções, testes e documentação. Boas frentes:
-
-- validação da assinatura dentro do app e perfis de assinatura (PAdES-LT/LTA, políticas ICP-Brasil);
-- teste com outros tokens/cartões e relatos de módulos PKCS#11 que funcionam;
-- assinatura e notarização do `.app`; empacotamento (`.dmg`);
-- posição do carimbo configurável.
-
-**Estrutura:** `app.py` (interface Tkinter) · `signer_core.py` (assinatura com pyHanko) · `placement.py` (área livre para o carimbo, via pypdfium2) · `settings.py` (configurações) · `selftest.py` · `tests/` · `assets/` (logo; `make_icon.swift` regenera o ícone com `swift assets/make_icon.swift assets`).
-
-**Autoteste:** `HollyAssinador.app/Contents/MacOS/HollyAssinador --self-test` assina um PDF temporário com um certificado temporário e confere pyHanko, pdfium e PKCS#11 empacotados. O `build_macos.sh` roda esse teste no final e falha se algo estiver quebrado.
-
-**Testes:** `.venv/bin/python -m unittest discover -s tests -t .` roda os testes do núcleo (gravação segura, validade do certificado, carimbo sem CPF, mensagens de erro, lote) e da janela, sempre com certificados e PDFs fictícios em pastas temporárias. O GitHub roda os mesmos testes e o autoteste a cada envio (`.github/workflows/testes.yml`).
+As preferências em `~/Library/Application Support/HollyAssinadorOffline/config.json` contêm apenas o tipo de certificado e a aparência. O fork não lê a configuração da versão original.
 
 ## Licença
 
-Distribuído sob a [Licença Apache 2.0](LICENSE). Os componentes de terceiros estão listados em [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); o núcleo usa o [pyHanko](https://github.com/MatthiasValvekens/pyHanko) (MIT).
+[Apache 2.0](LICENSE). Créditos e dependências em [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

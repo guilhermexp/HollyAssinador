@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import os
+import offline  # ativa o bloqueio antes das bibliotecas de terceiros
+
+import queue
 import subprocess
 import sys
 import threading
@@ -23,12 +25,11 @@ try:
     )
 except ImportError as exc:
     raise SystemExit(
-        "Dependências não instaladas. Execute ./build_macos.sh ou "
-        "'python3 -m pip install -r requirements.txt'."
+        "Dependências não instaladas. Execute ./build_macos.sh."
     ) from exc
 
 
-APP_TITLE = "HollyAssinador"
+APP_TITLE = "HollyAssinador Offline"
 
 APPEARANCES = {
     "invisible": "Invisível: sem carimbo no PDF (padrão)",
@@ -58,7 +59,6 @@ class AssinadorApp(tk.Tk):
 
         self.reason = tk.StringVar(value="Assinatura digital")
         self.location = tk.StringVar()
-        self.tsa_url = tk.StringVar()
         self.appearance = tk.StringVar(value="invisible")
         self.appearance_label = tk.StringVar(value=APPEARANCES["invisible"])
         self.status = tk.StringVar(value="Pronto.")
@@ -74,14 +74,6 @@ class AssinadorApp(tk.Tk):
         # Campos lembrados entre execuções (nunca a senha do A1 nem o PIN do A3).
         self._remembered = {
             "cert_type": self.cert_type,
-            "a1_file": self.a1_file,
-            "a3_module": self.a3_module,
-            "a3_token_label": self.a3_token_label,
-            "a3_cert_label": self.a3_cert_label,
-            "a3_key_label": self.a3_key_label,
-            "reason": self.reason,
-            "location": self.location,
-            "tsa_url": self.tsa_url,
             "appearance": self.appearance,
         }
         for key, value in settings.load().items():
@@ -179,7 +171,7 @@ class AssinadorApp(tk.Tk):
             row=0, column=2, **pad
         )
         ttk.Label(self.a1_frame, text="Senha").grid(row=1, column=0, sticky="w", **pad)
-        ttk.Entry(self.a1_frame, textvariable=self.a1_password, show="•").grid(
+        ttk.Entry(self.a1_frame, textvariable=self.a1_password, show="•", exportselection=False).grid(
             row=1, column=1, sticky="ew", **pad
         )
 
@@ -206,7 +198,7 @@ class AssinadorApp(tk.Tk):
             row=3, column=1, sticky="ew", **pad
         )
         ttk.Label(self.a3_frame, text="PIN").grid(row=4, column=0, sticky="w", **pad)
-        ttk.Entry(self.a3_frame, textvariable=self.a3_pin, show="•").grid(
+        ttk.Entry(self.a3_frame, textvariable=self.a3_pin, show="•", exportselection=False).grid(
             row=4, column=1, sticky="ew", **pad
         )
 
@@ -218,16 +210,14 @@ class AssinadorApp(tk.Tk):
         ttk.Entry(meta_box, textvariable=self.reason).grid(row=0, column=1, sticky="ew", **pad)
         ttk.Label(meta_box, text="Local").grid(row=1, column=0, sticky="w", **pad)
         ttk.Entry(meta_box, textvariable=self.location).grid(row=1, column=1, sticky="ew", **pad)
-        ttk.Label(meta_box, text="TSA (opcional)").grid(row=2, column=0, sticky="w", **pad)
-        ttk.Entry(meta_box, textvariable=self.tsa_url).grid(row=2, column=1, sticky="ew", **pad)
-        ttk.Label(meta_box, text="Aparência").grid(row=3, column=0, sticky="w", **pad)
+        ttk.Label(meta_box, text="Aparência").grid(row=2, column=0, sticky="w", **pad)
         appearance_box = ttk.Combobox(
             meta_box,
             textvariable=self.appearance_label,
             values=list(APPEARANCES.values()),
             state="readonly",
         )
-        appearance_box.grid(row=3, column=1, sticky="ew", **pad)
+        appearance_box.grid(row=2, column=1, sticky="ew", **pad)
         appearance_box.bind("<<ComboboxSelected>>", self._appearance_selected)
 
         bottom = ttk.Frame(outer)
@@ -381,33 +371,51 @@ class AssinadorApp(tk.Tk):
         opts = SignatureOptions(
             reason=self.reason.get().strip(),
             location=self.location.get().strip(),
-            tsa_url=self.tsa_url.get().strip(),
             appearance=self.appearance.get(),
         )
-        job = {
-            "type": self.cert_type.get(),
-            "pairs": pairs,
-            "a1_file": self.a1_file.get(),
-            "a1_password": self.a1_password.get(),
-            "a3_module": self.a3_module.get(),
-            "a3_token_label": self.a3_token_label.get(),
-            "a3_cert_label": self.a3_cert_label.get(),
-            "a3_key_label": self.a3_key_label.get(),
-            "a3_pin": self.a3_pin.get(),
-        }
+        job = {"type": self.cert_type.get(), "pairs": pairs}
+        if job["type"] == "A1":
+            job.update(a1_file=self.a1_file.get(), a1_password=self.a1_password.get())
+        else:
+            job.update(
+                a3_module=self.a3_module.get(),
+                a3_token_label=self.a3_token_label.get(),
+                a3_cert_label=self.a3_cert_label.get(),
+                a3_key_label=self.a3_key_label.get(),
+                a3_pin=self.a3_pin.get(),
+            )
         self._clear_secrets()
-        thread = threading.Thread(target=self._sign_worker, args=(job, opts), daemon=True)
+        events = queue.SimpleQueue()
+        thread = threading.Thread(target=self._sign_worker, args=(job, opts, events), daemon=True)
         thread.start()
+        self.after(30, self._receive_results, events)
 
-    def _sign_worker(self, job: dict, opts: SignatureOptions):
+    def _receive_results(self, events):
+        while True:
+            try:
+                kind, value = events.get_nowait()
+            except queue.Empty:
+                self.after(30, self._receive_results, events)
+                return
+            if kind == "progress":
+                self.status.set(value)
+            elif kind == "error":
+                self._error(value)
+                return
+            else:
+                self._finished(value)
+                return
+
+    @staticmethod
+    def _sign_worker(job: dict, opts: SignatureOptions, events):
         def progress(index: int, total: int, src: Path):
             if total > 1:
                 text = f"Assinando {index} de {total}: {src.name}…"
-                self.after(0, lambda: self.status.set(text))
+                events.put(("progress", text))
 
         try:
             if job["type"] == "A1":
-                signer = load_a1(job["a1_file"], job["a1_password"])
+                signer = load_a1(job["a1_file"], job.pop("a1_password"))
                 outcomes = sign_batch(signer, job["pairs"], opts, progress)
             else:
                 # O token é aberto uma vez só, mesmo num lote: o PIN vale para todos.
@@ -416,13 +424,15 @@ class AssinadorApp(tk.Tk):
                     job["a3_token_label"],
                     job["a3_cert_label"],
                     job["a3_key_label"],
-                    job["a3_pin"],
+                    job.pop("a3_pin"),
                 ) as signer:
                     outcomes = sign_batch(signer, job["pairs"], opts, progress)
 
-            self.after(0, lambda: self._finished(outcomes))
-        except Exception as exc:
-            self.after(0, lambda e=str(exc): self._error(e))
+            events.put(("done", outcomes))
+        except SigningError as exc:
+            events.put(("error", str(exc)))
+        except Exception:
+            events.put(("error", "Falha inesperada ao assinar o PDF."))
 
     @staticmethod
     def _error_list(failed: list[BatchOutcome]) -> str:
@@ -485,7 +495,7 @@ class AssinadorApp(tk.Tk):
             messagebox.showinfo(APP_TITLE, "O PDF assinado não está mais no mesmo lugar.")
             return
         # "open -R" abre a pasta no Finder com o arquivo selecionado.
-        subprocess.Popen(["open", "-R", str(existing[0])])
+        subprocess.Popen(["/usr/bin/open", "-R", str(existing[0])])
 
 
 def main():

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import tempfile
+import socket
 from pathlib import Path
 
 
@@ -64,6 +65,22 @@ def _pkcs12_bytes(password: bytes):
     return data, cert
 
 
+def _check_network_block():
+    # Nenhuma credencial é carregada neste controle. Usa apenas loopback.
+    for family, host in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+        for kind in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
+            try:
+                with socket.socket(family, kind) as sock:
+                    sock.settimeout(1)
+                    if kind == socket.SOCK_STREAM:
+                        sock.connect((host, 9))
+                    else:
+                        sock.sendto(b"offline-self-test", (host, 9))
+            except PermissionError:
+                continue
+            raise RuntimeError("O sistema permitiu acesso de rede durante o autoteste.")
+
+
 def run() -> int:
     import tkinter
 
@@ -77,6 +94,9 @@ def run() -> int:
 
     print(f"tkinter {tkinter.TkVersion}: ok")
     print("pkcs11: ok")
+
+    _check_network_block()
+    print("TCP e UDP bloqueados pelo macOS em IPv4 e IPv6: ok")
 
     password = b"autoteste"
     with tempfile.TemporaryDirectory() as tmp:

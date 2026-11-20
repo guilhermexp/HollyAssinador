@@ -44,6 +44,7 @@ class AssinaturaBasicaTests(BaseTemporaria):
     def test_assina_e_a_assinatura_valida(self):
         src = apoio.pdf(self.pasta / "peticao.pdf")
         resultado = self.assinar(src, self.pasta / "peticao-assinado.pdf")
+        self.assertEqual(resultado.path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(resultado.notes, ())
         self.assertTrue(apoio.assinatura_valida(resultado.path))
         self.assertEqual(self.temporarios_restantes(), [])
@@ -63,16 +64,18 @@ class GravacaoSeguraTests(BaseTemporaria):
         dst = self.pasta / "peticao-assinado.pdf"
         dst.write_bytes(b"%PDF versao anterior, ja assinada e protocolada")
         antes = dst.read_bytes()
+        src.write_bytes(b"PDF incompleto")
         with self.assertRaises(SigningError):
-            self.assinar(src, dst, SignatureOptions(tsa_url=apoio.TSA_FORA_DO_AR))
+            self.assinar(src, dst)
         self.assertEqual(dst.read_bytes(), antes)
         self.assertEqual(self.temporarios_restantes(), [])
 
     def test_falha_sem_arquivo_anterior_nao_deixa_lixo(self):
         src = apoio.pdf(self.pasta / "peticao.pdf")
         dst = self.pasta / "peticao-assinado.pdf"
+        src.write_bytes(b"PDF incompleto")
         with self.assertRaises(SigningError):
-            self.assinar(src, dst, SignatureOptions(tsa_url=apoio.TSA_FORA_DO_AR))
+            self.assinar(src, dst)
         self.assertFalse(dst.exists())
         self.assertEqual(self.temporarios_restantes(), [])
 
@@ -173,10 +176,8 @@ class CarimboTests(BaseTemporaria):
 class MensagensTests(BaseTemporaria):
     """Item 5 da revisão: erros comuns em português e PIN errado distinto de token ausente."""
 
-    def test_tsa_fora_do_ar(self):
-        src = apoio.pdf(self.pasta / "peticao.pdf")
-        with self.assertRaisesRegex(SigningError, "carimbo do tempo"):
-            self.assinar(src, self.pasta / "s.pdf", SignatureOptions(tsa_url=apoio.TSA_FORA_DO_AR))
+    def test_erro_desconhecido_preserva_dados_do_driver(self):
+        self.assertNotIn("PIN=1357", friendly_error(RuntimeError("PIN=1357")))
 
     def test_pdf_protegido_por_senha(self):
         import io

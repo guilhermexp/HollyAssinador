@@ -63,7 +63,6 @@ class JanelaTests(unittest.TestCase):
         j.a1_password.set(apoio.SENHA)
         for var in (j.a3_module, j.a3_token_label, j.a3_cert_label, j.a3_key_label, j.a3_pin):
             var.set("")
-        j.tsa_url.set("")
         j.appearance.set("invisible")
         j.last_outputs = []
         j.finder_button.configure(state="disabled")
@@ -123,6 +122,7 @@ class JanelaTests(unittest.TestCase):
         conteudo = CONFIG.read_text(encoding="utf-8")
         self.assertNotIn(apoio.SENHA, json.loads(conteudo).values())
         self.assertNotIn("PIN-SECRETO", conteudo)
+        self.assertEqual(set(json.loads(conteudo)), {"cert_type", "appearance"})
 
     def test_lote_assina_todos_ao_lado_dos_originais(self):
         pdfs = [apoio.pdf(self.pasta / f"doc{i}.pdf") for i in range(3)]
@@ -214,7 +214,7 @@ class JanelaTests(unittest.TestCase):
         self.janela.last_outputs = [assinado]
         with mock.patch.object(app.subprocess, "Popen") as popen:
             self.janela._reveal()
-        popen.assert_called_once_with(["open", "-R", str(assinado)])
+        popen.assert_called_once_with(["/usr/bin/open", "-R", str(assinado)])
 
 
 if __name__ == "__main__":

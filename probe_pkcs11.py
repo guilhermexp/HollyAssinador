@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import offline  # ativa o bloqueio antes das bibliotecas de terceiros
+
 import getpass
 import sys
 from pathlib import Path
@@ -31,7 +33,6 @@ def main():
         print(f"[{i}] Token label: {token.label}")
         print(f"    Fabricante: {token.manufacturer_id}")
         print(f"    Modelo: {token.model}")
-        print(f"    Serial: {token.serial}")
 
     print()
     selected = input("Número do token para inspecionar [1]: ").strip() or "1"
@@ -63,8 +64,8 @@ def main():
                 print(f"  label={label!r} id={bytes(obj_id).hex() if obj_id else ''}")
             if not found:
                 print("  (nenhuma chave privada listada)")
-    except Exception as exc:
-        raise SystemExit(f"Falha ao abrir/inspecionar token: {exc}") from exc
+    except Exception:
+        raise SystemExit("Falha ao abrir ou inspecionar o token.") from None
 
 
 if __name__ == "__main__":
